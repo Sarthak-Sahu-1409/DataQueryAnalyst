@@ -178,4 +178,3 @@ curl -G \
 - Empty/incorrect results: inspect `stdout`/`stderr` and the generated code in the response.
 - Large files: consider multipart upload and server/proxy body size limits.
 
-## License
