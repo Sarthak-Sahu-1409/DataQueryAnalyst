@@ -1,180 +1,192 @@
-# Data Query Assistant - Technical Documentation
+# High-Level Backend Workflow
 
-## Overview
-Data Query Assistant is a full-stack application that lets users analyze CSV datasets using natural language. The backend uses FastAPI and Google Gemini (via LangChain) to generate Python code, executes that code, and returns results and optional visualizations. Uploaded CSVs and generated images are stored in AWS S3 under session-specific prefixes.
+The backend is a Python application built with the **FastAPI** web framework. Its primary purpose is to:
 
-## Architecture
-- Frontend: React (Vite) SPA with drag-and-drop CSV upload and a query UI.
-- Backend: FastAPI service exposing endpoints for upload, analysis, session cleanup, and image retrieval.
-- LLM: Google Gemini for code generation, integrated through LangChain.
-- Execution: Generated Python code executed in a controlled environment; stdout/stderr captured.
-- Storage: AWS S3 (boto3). Objects are saved as `sessions/{session_id}/...`.
+1. Receive a CSV file from a user.  
+2. Generate Python code based on a user's natural language query about the CSV data, using a Large Language Model (LLM).  
+3. Execute the generated code to perform data analysis.  
+4. Return the results, which can include text, tables, and plots, back to the user.  
 
-## Repository Structure
-```
-backend/
-  main.py                 # FastAPI app and endpoints
-  utils/
-    llmhandler.py         # LLM prompt + code generation
-    processdata.py        # CSV metadata + sample extraction
-    pythonexecutor.py     # Run generated Python code
-  pyproject.toml          # Poetry dependencies
-  poetry.lock
-frontend/
-  csv-analyzer-ui/        # React app (Vite)
-README.md                 # Project quickstart
-DOCUMENTATION.md          # This document
-```
+The backend maintains a **session** for each uploaded file, identified by a unique `session_id`.  
+This allows users to ask multiple questions about the same file. It supports storing files either on the **local filesystem** or on **Amazon S3**.
 
-## Prerequisites
-- Python 3.12+
-- Node.js 18+
-- Google Gemini API key
-- AWS account with an S3 bucket
+---
 
-## Configuration
-Create a `.env` file in the `backend/` directory or provide these as environment variables:
-```
-GOOGLE_API_KEY=your_google_gemini_api_key_here
-AWS_ACCESS_KEY_ID=your_access_key_id
-AWS_SECRET_ACCESS_KEY=your_secret_access_key
-AWS_REGION=your_aws_region            # e.g., us-east-1
-S3_BUCKET_NAME=your_bucket_name       # existing bucket
-```
-Notes:
-- boto3 uses the default AWS credential chain. You may use IAM roles, AWS profiles, or environment variables.
-- Ensure the principal has `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`, and `s3:ListBucket` permissions on the bucket.
+## Step-by-Step Workflow
 
-## Installation
-Backend:
-```
-cd backend
-pip install poetry
-poetry install
-poetry shell
-```
-Frontend:
-```
-cd frontend/csv-analyzer-ui
-npm install
-```
+1. **File Upload**  
+   - The user uploads a CSV file.  
+   - The backend saves it and creates a new session, returning the `session_id`.  
 
-## Running
-Backend:
-```
-cd backend
-poetry shell
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-Frontend:
-```
-cd frontend/csv-analyzer-ui
-npm run dev
-```
+2. **Analysis Request**  
+   - The user sends a query (e.g., *"Show me the average sales per month"*) along with the `session_id`.  
 
-## Data Flow
-1. User uploads a CSV via the frontend.
-2. Backend streams the file to S3 at `sessions/{session_id}/{file_name}` and returns `session_id`.
-3. User submits a natural language query with `session_id`.
-4. Backend locates the CSV in S3, downloads it to a temp path, extracts metadata/sample, requests code from the LLM, then executes that code.
-5. If a visualization is generated, the image is uploaded to S3 as `sessions/{session_id}/output_{timestamp}.png`.
+3. **Code Generation**  
+   - The backend uses an LLM (via **LangChain** and **Google’s Gemini model**) to convert the user’s query into executable Python code.  
+   - It provides the LLM with context, including the CSV’s structure (column names, data types) and a sample of the data.  
 
-## API Reference
-Base URL: `http://localhost:8000`
+4. **Code Execution**  
+   - The generated Python code is executed in a secure environment.  
+   - The code loads the CSV data into a pandas DataFrame and performs the requested analysis.  
 
-### POST /upload/
-- Description: Upload a CSV; store it in S3; return session info.
-- Request: multipart/form-data with `file`.
-- Response 200:
-```
-{
-  "session_id": "<uuid>",
-  "file_name": "<original.csv>"
-}
-```
-Example:
-```
-curl -X POST \
-  -F "file=@/path/to/data.csv" \
-  http://localhost:8000/upload/
-```
+5. **Return Results**  
+   - The output (text, tables, or a generated plot saved as an image) is captured and sent back to the user as a JSON response.  
 
-### POST /analyze/
-- Description: Analyze the uploaded CSV using a natural language prompt.
-- Request: multipart/form-data
-  - `session_id` (string, required)
-  - `user_query` (string, required)
-- Response 200:
-```
-{
-  "metadata_and_sample": { ... },
-  "generated_code": "<python code>",
-  "stdout": "...",
-  "stderr": "...",
-  "flags": { ... },
-  "image_key": "sessions/{session_id}/output_{timestamp}.png" | null,
-  "image_timestamp": "YYYYMMDDHHMMSS" | null
-}
-```
-Example:
-```
-curl -X POST \
-  -F "session_id=<uuid-from-upload>" \
-  -F "user_query=Show average price by category" \
-  http://localhost:8000/analyze/
-```
+---
 
-### POST /clear_session/
-- Description: Delete all S3 objects under `sessions/{session_id}/`.
-- Request: multipart/form-data with `session_id`.
-- Response 200:
-```
-{ "status": "session cleared" }
-```
-Example:
-```
-curl -X POST -F "session_id=<uuid>" http://localhost:8000/clear_session/
-```
+# File-by-File Explanation
 
-### GET /get_image/
-- Description: Download a generated image via the backend.
-- Query params:
-  - `session_id` (string, required)
-  - `timestamp` (YYYYMMDDHHMMSS, required)
-- Response 200: image/png; 404 if missing
-Example:
-```
-curl -G \
-  --data-urlencode "session_id=<uuid>" \
-  --data-urlencode "timestamp=<YYYYMMDDHHMMSS>" \
-  http://localhost:8000/get_image/ --output output.png
-```
+## `main.py` (The Core API)
 
-## Security and Permissions
-- Prefer least-privilege IAM policies scoped to the target bucket/prefix.
-- Consider request size limits and validation for uploads.
-- Avoid long-lived static AWS keys in production; prefer roles and secret managers.
+- **Role**: Main entry point of the backend. Defines the API endpoints.  
+- **Framework**: FastAPI.  
+- **Storage**: Either Amazon S3 or local filesystem (based on `S3_BUCKET_NAME` environment variable).  
 
-## Error Handling
-- Upload errors: 4xx for invalid input; 5xx for S3 or server failures.
-- Analyze errors: 404 if session file missing; `stderr` surfaces code execution issues.
-- Image retrieval: 404 when the specified image does not exist.
+### Endpoints:
+- **POST `/upload/`**
+  - Receives a CSV file.  
+  - Generates a unique `session_id`.  
+  - Saves file to session-specific location (S3 or local).  
+  - Interacts with `utils/local_storage.py`.  
 
-## Frontend Notes
-- Development expects backend at `http://localhost:8000`.
-- Upload must be `multipart/form-data` with field name `file`.
-- When `image_key` and `image_timestamp` are returned, call `/get_image` to display the chart.
+- **POST `/analyze/`**
+  - Takes `session_id` and `user_query`.  
+  - Retrieves CSV path via `session_id`.  
+  - Calls:
+    - `extract_csv_metadata_and_sample()` from `processdata.py`.  
+    - `generate_code_from_query()` from `llmhandler.py`.  
+    - `run_generated_code()` from `pythonexecutor.py`.  
+  - Returns analysis results as JSON.  
 
-## Deployment
-- Containerize the backend and front it with a reverse proxy (TLS enabled).
-- Configure env via a secrets manager (AWS SSM/Secrets Manager) in production.
-- Attach an IAM role to compute (ECS/EKS/EC2/Lambda) for S3 access.
-- Build frontend (`npm run build`) and deploy to static hosting/CDN.
+- **POST `/clear_session/`**  
+  - Clears all session data, including files and memory.  
 
-## Troubleshooting
-- S3 AccessDenied: verify credentials/role, bucket policy, and region.
-- Missing S3 bucket: create the bucket in `AWS_REGION`; set `S3_BUCKET_NAME`.
-- LLM failures: validate `GOOGLE_API_KEY` and service quotas.
-- Empty/incorrect results: inspect `stdout`/`stderr` and the generated code in the response.
-- Large files: consider multipart upload and server/proxy body size limits.
+- **GET `/get_image/`**  
+  - Retrieves plot image generated by analysis.  
 
+---
+
+## `utils/llmhandler.py` (LLM Interaction & Memory)
+
+- **Frameworks**: LangChain + Google Generative AI.  
+- **Responsibilities**:  
+  - Handles communication with the LLM.  
+  - Manages session-specific chat memory.  
+
+### Key Functions:
+- **generate_code_from_query()**
+  - Builds LLM prompt with:
+    - CSV file path & metadata.  
+    - Session history.  
+    - Latest user query.  
+  - Invokes LLM and extracts Python code.  
+
+- **get_session_history() / save_session_history()**
+  - Manages chat history per session.  
+  - Stored in `memory.pkl` inside session directory.  
+
+- **clear_memory()**
+  - Removes chat history and deletes `memory.pkl` when session is cleared.  
+
+---
+
+## `utils/pythonexecutor.py` (Code Execution)
+
+- **Frameworks**: pandas.  
+- **Responsibilities**: Safely runs Python code generated by LLM.  
+
+### Key Function:
+- **run_generated_code()**
+  - Detects CSV encoding.  
+  - Loads CSV into pandas DataFrame `df`.  
+  - Executes LLM-generated code using `exec()`.  
+  - Captures:
+    - Standard output (tables, text).  
+    - Errors.  
+    - Generated plots (saved as `output.png`).  
+  - Returns outputs, errors, and flags indicating result type.  
+
+---
+
+## `utils/processdata.py` (Data Pre-processing)
+
+- **Frameworks**: pandas.  
+- **Responsibilities**: Extract metadata & sample data for LLM context.  
+
+### Key Function:
+- **extract_csv_metadata_and_sample()**
+  - Reads CSV file.  
+  - Extracts:
+    - Column names.  
+    - Row count.  
+    - Data types.  
+    - Missing value counts.  
+  - Samples first 5 rows.  
+
+---
+
+## `utils/local_storage.py` (Local File Management)
+
+- **Responsibilities**: Handle files if not using S3.  
+
+### Key Functions:
+- **setup_local_storage()**
+  - Creates `uploaded_csv` root directory.  
+
+- **save_uploaded_file()**
+  - Saves uploaded CSV to session sub-directory.  
+
+- **get_session_file()**
+  - Retrieves CSV path for given session.  
+
+- **save_output_image()**
+  - Stores generated plot (`output.png`).  
+
+- **clear_local_session()**
+  - Deletes entire session directory and contents.  
+
+---
+
+# Chat History with LangChain
+
+The chat history in this backend is a key feature that makes the conversation with the AI feel natural and context-aware. It is managed in the `backend/utils/llmhandler.py` file using several components from LangChain.
+
+Here’s a breakdown of how it works:
+
+### 1. Session-Based History
+
+For every uploaded CSV file, a unique `session_id` is created. This `session_id` is used to maintain a separate and isolated conversation history for that specific file. This means you can have conversations about multiple different files without the contexts getting mixed up.
+
+### 2. Storing the History (In-Memory and On-Disk)
+
+The backend uses a two-level approach to store the history for each session:
+
+1.  **In-Memory Cache (`histories` dictionary)**: For speed, the chat history of active sessions is kept in a Python dictionary in memory.
+2.  **File-Based Persistence (`memory.pkl`)**: To ensure the history isn't lost if the server restarts, the history object is saved to a file named `memory.pkl` inside the corresponding session's directory (e.g., `uploaded_csv/<session_id>/memory.pkl`). This process of saving is called "pickling."
+
+The function `get_session_history(session_id)` manages this. When you make a request:
+*   It first checks the in-memory `histories` dictionary.
+*   If the history isn't there, it looks for the `memory.pkl` file and loads it.
+*   If no file exists (i.e., it's the first query for that session), it creates a fresh history object.
+
+### 3. LangChain's `ConversationBufferWindowMemory`
+
+When a new history object is created, it's an instance of `ConversationBufferWindowMemory(k=5, return_messages=True)`.
+
+*   This specific type of memory stores the conversation.
+*   The `k=5` parameter is important: it means the memory will only keep the **last 5 conversational exchanges** (5 user queries and 5 AI responses). This is a practical choice to keep the context relevant without making the prompt sent to the LLM excessively long and expensive.
+
+### 4. Automatic History Management with `RunnableWithMessageHistory`
+
+This is the core LangChain component that automates the process. The conversational chain is wrapped in `RunnableWithMessageHistory`.
+
+Here’s what it does automatically on every call to the analysis endpoint:
+
+1.  **Fetch History**: It calls the `get_session_history` function you provide, passing in the `session_id` to get the correct history for the current conversation.
+2.  **Inject into Prompt**: It takes the messages from the fetched history and automatically inserts them into the prompt where the `MessagesPlaceholder(variable_name="history")` is located.
+3.  **Call the LLM**: It sends the complete prompt (with instructions, CSV info, past conversation, and your new query) to the Gemini model.
+4.  **Update History**: After the LLM responds, it automatically updates the session's history object with your latest query and the AI's response.
+
+Finally, the `save_session_history(session_id)` function is called to "pickle" the updated history object and save it back to the `memory.pkl` file, ensuring it's available for the next query in the session.
+
+In short, `RunnableWithMessageHistory` acts as a smart wrapper that handles the loading, injecting, and saving of the conversation history for you, making the LLM "remember" the last few things you talked about.
