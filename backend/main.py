@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 import uuid
 import boto3
-from utils.llmhandler import generate_code_from_query
+from utils.llmhandler import generate_code_from_query, clear_memory
 from utils.pythonexecutor import run_generated_code
 from utils.processdata import extract_csv_metadata_and_sample
 from datetime import datetime
@@ -49,7 +49,7 @@ async def analyze_csv(
     csv_info = extract_csv_metadata_and_sample(local_path)
 
     # Generate code from LLM
-    code = generate_code_from_query(local_path, user_query)
+    code = generate_code_from_query(session_id, local_path, user_query)
 
     # Run the generated code and get flags
     output, error, flags = run_generated_code(code, local_path)
@@ -82,6 +82,10 @@ async def clear_session(session_id: str = Form(...)):
     files = response.get("Contents", [])
     for obj in files:
         s3.delete_object(Bucket=S3_BUCKET, Key=obj["Key"])
+    
+    # Clear the conversation memory for the session
+    clear_memory(session_id)
+    
     return JSONResponse(content={"status": "session cleared"})
 
 @app.get("/get_image/")
