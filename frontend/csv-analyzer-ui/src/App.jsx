@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import axios from "axios";
 import {
   Upload,
   Send,
@@ -10,6 +11,7 @@ import {
   Trash2,
   Download,
   Loader,
+  CheckCircle,
 } from "lucide-react";
 import "./App.css";
 
@@ -22,6 +24,9 @@ const CSVAnalyzer = () => {
   const fileInputRef = useRef(null);
   const chatEndRef = useRef(null);
   const [sessionId, setSessionId] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadSuccess, setUploadSuccess] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   // Store image URLs for each assistant message by message id
   const [imageURLs, setImageURLs] = useState({});
@@ -34,20 +39,34 @@ const CSVAnalyzer = () => {
   const handleFileUpload = async (file) => {
     if (file && file.type === "text/csv") {
       setCurrentFile(file);
-      // Upload to backend and get sessionId
+      setUploadProgress(0);
+      setUploadSuccess(false);
+      setUploading(true);
+
       const formData = new FormData();
       formData.append("file", file);
+
       try {
-        const response = await fetch(
-          "https://finanalystai.onrender.com/upload/",
+        const response = await axios.post(
+          "http://localhost:8000/upload/",
+          formData,
           {
-            method: "POST",
-            body: formData,
+            headers: {
+              "Content-Type": "multipart/form-data",
+            },
+            onUploadProgress: (progressEvent) => {
+              const percentCompleted = Math.round(
+                (progressEvent.loaded * 100) / progressEvent.total
+              );
+              setUploadProgress(percentCompleted);
+            },
           }
         );
-        const result = await response.json();
-        if (result.session_id) {
-          setSessionId(result.session_id);
+
+        if (response.data.session_id) {
+          setSessionId(response.data.session_id);
+          setUploadSuccess(true);
+          setTimeout(() => setUploadSuccess(false), 3000); // Hide after 3s
         } else {
           alert("Failed to upload file.");
           setCurrentFile(null);
@@ -55,6 +74,8 @@ const CSVAnalyzer = () => {
       } catch (err) {
         alert("Failed to upload file.");
         setCurrentFile(null);
+      } finally {
+        setUploading(false);
       }
     } else {
       alert("Please upload a valid CSV file");
@@ -101,7 +122,7 @@ const CSVAnalyzer = () => {
 
     try {
       const response = await fetch(
-        "https://finanalystai.onrender.com/analyze/",
+        "http://localhost:8000/analyze/",
         {
           method: "POST",
           body: formData,
@@ -136,7 +157,7 @@ const CSVAnalyzer = () => {
     if (!sessionId || !timestamp) return;
     try {
       const response = await fetch(
-        `https://finanalystai.onrender.com/get_image/?session_id=${sessionId}&timestamp=${timestamp}`
+        `http://localhost:8000/get_image/?session_id=${sessionId}&timestamp=${timestamp}`
       );
       if (response.ok) {
         const blob = await response.blob();
@@ -153,7 +174,7 @@ const CSVAnalyzer = () => {
     if (!sessionId || !timestamp) return;
     try {
       const response = await fetch(
-        `https://finanalystai.onrender.com/get_image/?session_id=${sessionId}&timestamp=${timestamp}`
+        `http://localhost:8000/get_image/?session_id=${sessionId}&timestamp=${timestamp}`
       );
       if (response.ok) {
         const blob = await response.blob();
@@ -175,7 +196,7 @@ const CSVAnalyzer = () => {
       const formData = new FormData();
       formData.append("session_id", sessionId);
       try {
-        await fetch("https://finanalystai.onrender.com/clear_session/", {
+        await fetch("http://localhost:8000/clear_session/", {
           method: "POST",
           body: formData,
         });
@@ -327,6 +348,10 @@ const CSVAnalyzer = () => {
                       </p>
                     </div>
                   </div>
+                ) : uploading ? (
+                  <div className="upload-icon-container default">
+                    <Loader size={32} className="animate-spin" />
+                  </div>
                 ) : (
                   <div>
                     <div className="upload-icon-container default">
@@ -343,6 +368,22 @@ const CSVAnalyzer = () => {
                   </div>
                 )}
               </div>
+
+              {uploadProgress > 0 && uploadProgress < 100 && (
+                <div className="progress-bar-container">
+                  <div
+                    className="progress-bar"
+                    style={{ width: `${uploadProgress}%` }}
+                  ></div>
+                </div>
+              )}
+
+              {uploadSuccess && (
+                <div className="upload-success-message">
+                  <CheckCircle size={16} color="#16a34a" />
+                  <span>File uploaded successfully!</span>
+                </div>
+              )}
 
               {/* Query Input */}
               <div className="query-section">

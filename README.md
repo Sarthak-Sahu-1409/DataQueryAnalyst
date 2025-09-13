@@ -1,34 +1,45 @@
 # Data Query Assistant
 
-A powerful web application that allows users to analyze CSV data using natural language queries. The system leverages AI (Google Gemini) to generate Python code for data analysis and visualization, and uses AWS S3 for secure file storage throughout the workflow, making data exploration accessible to users without programming knowledge.
+A powerful web application that allows users to analyze CSV data using natural language queries. The system leverages AI (Google Gemini) to generate Python code for data analysis and visualization. It supports both AWS S3 and local storage for secure file management, making data exploration accessible to users without programming knowledge.
 
 ## 🚀 Features
 
 - **Natural Language Queries**: Ask questions about your data in plain English
-- **AI-Powered Code Generation**: Uses Google Gemini 2.5 Flash to generate Python code
-- **Interactive Web Interface**: Modern React-based UI with drag-and-drop file upload
+- **AI-Powered Code Generation**: Uses Google Gemini 1.5/2.5 Flash to generate Python code
+- **Interactive Web Interface**: Modern React-based UI with drag-and-drop file upload and progress indicators
 - **Real-time Data Analysis**: Execute generated code and see results instantly
 - **Data Visualization**: Generate charts and graphs with matplotlib
 - **CSV Metadata Extraction**: Automatic analysis of data structure and sample rows
-- **Session Management**: Secure file handling with automatic cleanup
+- **Flexible Storage**: AWS S3 for production, automatic local fallback for development
+- **Smart Session Management**: 
+  - Persistent conversation memory (keeps last 5 interactions)
+  - Secure file handling with automatic cleanup
+  - Full session isolation and deletion
+- **Encoding Support**: Automatic CSV encoding detection and handling
 - **Responsive Design**: Works seamlessly on desktop and mobile devices
 
 ## 🏗️ Architecture
 
-The project follows a modern full-stack architecture:
+The project follows a modern full-stack architecture with flexible storage options and intelligent session management:
 
 ### Backend (FastAPI + Python)
 - **FastAPI**: High-performance web framework for building APIs
 - **LangChain**: Framework for building LLM-powered applications
+  - ConversationBufferWindowMemory for context-aware chat
+  - RunnableWithMessageHistory for modern LangChain integration
 - **Google Gemini**: AI model for code generation
 - **Pandas**: Data manipulation and analysis
 - **Matplotlib**: Data visualization
-- **AWS S3 (boto3)**: Object storage for uploaded CSVs and generated images
+- **Storage**:
+  - AWS S3 (boto3) for production storage
+  - Local filesystem fallback for development
+  - Automatic encoding detection (chardet)
 - **Poetry**: Dependency management
 
 ### Frontend (React + Vite)
 - **React 19**: Modern UI library
 - **Vite**: Fast build tool and dev server
+- **Axios**: HTTP client with upload progress support
 - **Lucide React**: Beautiful icon library
 - **Responsive CSS**: Mobile-first design approach
 
@@ -36,29 +47,39 @@ The project follows a modern full-stack architecture:
 
 ```
 Data Query Assistant/
-├── backend/                 # Python FastAPI backend
-│   ├── main.py             # Main FastAPI application
-│   ├── utils/              # Utility modules
-│   │   ├── llmhandler.py   # AI code generation
-│   │   ├── processdata.py  # CSV processing utilities
-│   │   └── pythonexecutor.py # Code execution engine
-│   ├── uploaded_csvs/      # Temporary file storage (not used when S3 is enabled)
-│   ├── pyproject.toml      # Python dependencies
-│   └── poetry.lock         # Locked dependency versions
-├── frontend/               # React frontend
-│   └── csv-analyzer-ui/    # Main UI application
-│       ├── src/            # React components
-│       ├── public/         # Static assets
-│       └── package.json    # Node.js dependencies
-└── README.md               # This file
+├── backend/                    # Python FastAPI backend
+│   ├── main.py                # Main FastAPI application
+│   ├── utils/                 # Utility modules
+│   │   ├── llmhandler.py      # AI code generation & chat memory
+│   │   ├── processdata.py     # CSV processing utilities
+│   │   ├── pythonexecutor.py  # Code execution engine
+│   │   └── local_storage.py   # Local storage fallback
+│   ├── uploaded_csv/          # Local storage for sessions
+│   │   └── <session_id>/      # Per-session storage
+│   │       ├── *.csv          # Uploaded CSV files
+│   │       ├── *.png          # Generated visualizations
+│   │       └── memory.pkl     # Conversation memory
+│   ├── pyproject.toml         # Python dependencies
+│   └── poetry.lock            # Locked dependency versions
+├── frontend/                  # React frontend
+│   └── csv-analyzer-ui/       # Main UI application
+│       ├── src/               # React components
+│       │   ├── App.jsx        # Main application logic
+│       │   └── assets/        # Static assets
+│       └── package.json       # Node.js dependencies
+└── README.md                  # This file
 ```
 
 ## 🛠️ Prerequisites
 
+Required:
 - **Python 3.12+**
 - **Node.js 18+**
 - **Google Gemini API Key** (for AI code generation)
-- **AWS Account + S3 Bucket** (for file storage)
+
+Optional:
+- **AWS Account + S3 Bucket** (for production storage)
+  - If not provided, system uses local storage automatically
 
 ## 🚀 Installation & Setup
 
@@ -84,14 +105,17 @@ poetry install
 @"
 GOOGLE_API_KEY=your_api_key_here
 
-# AWS credentials (or use IAM role / AWS profile)
+# AWS credentials (optional - for S3 storage)
 AWS_ACCESS_KEY_ID=your_access_key_id
 AWS_SECRET_ACCESS_KEY=your_secret_access_key
 AWS_REGION=your_aws_region
 
-# Target S3 bucket
+# Target S3 bucket (optional)
 S3_BUCKET_NAME=your_bucket_name
 "@ | Out-File -Encoding utf8 .env
+
+# Note: If S3 credentials are not provided, the system will automatically 
+# use local storage in the backend/uploaded_csv directory
 
 # Activate virtual environment
 poetry shell

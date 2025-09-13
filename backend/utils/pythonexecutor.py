@@ -2,7 +2,43 @@ import sys
 import io
 import os
 import pandas as pd
+import chardet
 from utils.llmhandler import generate_code_from_query
+
+def try_read_csv(file_path: str, encoding: str) -> tuple[pd.DataFrame | None, Exception | None]:
+    """Try to read CSV with a specific encoding, return (dataframe, error)."""
+    try:
+        df = pd.read_csv(file_path, encoding=encoding)
+        return df, None
+    except Exception as e:
+        return None, e
+
+def detect_encoding(file_path: str) -> str:
+    """
+    Detect the encoding of a file using a priority list of common encodings
+    and falling back to chardet only if needed.
+    """
+    # Try common encodings first in order of likelihood
+    common_encodings = ['utf-8', 'latin1', 'cp1252', 'ISO-8859-1']
+    
+    for encoding in common_encodings:
+        df, error = try_read_csv(file_path, encoding)
+        if df is not None:
+            return encoding
+    
+    # If common encodings fail, try chardet but validate its suggestion
+    with open(file_path, 'rb') as file:
+        raw_data = file.read()
+        result = chardet.detect(raw_data)
+        detected = result.get('encoding')
+        
+        if detected and detected.lower() not in ['johab']:  # Skip problematic encodings
+            df, error = try_read_csv(file_path, detected)
+            if df is not None:
+                return detected
+    
+    # If all else fails, use latin1 (it can read any byte sequence)
+    return 'latin1'
 
 def run_generated_code(code: str, csv_path: str):
     """
@@ -10,8 +46,12 @@ def run_generated_code(code: str, csv_path: str):
     Captures and returns stdout and stderr output.
     Also returns flags indicating if an image was generated, if stdout was produced, or both.
     """
-    # Load the CSV into a DataFrame named 'df'
-    df = pd.read_csv(csv_path)
+    # Try to load the CSV with the best encoding
+    encoding = detect_encoding(csv_path)
+    df, error = try_read_csv(csv_path, encoding)
+    
+    if error:
+        raise RuntimeError(f"Failed to read CSV with encoding {encoding}: {error}")
 
     # Prepare the execution environment
     local_vars = {'df': df}
